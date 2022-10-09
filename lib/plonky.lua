@@ -161,7 +161,8 @@ function Plonky:new(args)
     m.voices[i]={
       voice_set=vs,
       division=8,-- 8=quarter notes
-      step_direction=3,
+      step_direction="F",
+	  step_position="F",
 	  cluster={},
       pressed={},
       latched={},
@@ -190,7 +191,7 @@ function Plonky:new(args)
   m.timers={}
   m.divisions={1,2,4,6,8,12,16,24,32,48,64}
   m.division_names={"2","1","1/2","1/2t","1/4","1/4t","1/8","1/8t","1/16","1/16t","1/32"}
-  m.step_name={"Backward","Random","Forward"}
+  m.step_name={"Backward","Random","Forward","Mirror"}
   for _,division in ipairs(m.divisions) do
     m.timers[division]={}
     m.timers[division].lattice=m.lattice:new_pattern{
@@ -343,7 +344,7 @@ function Plonky:setup_params()
   if thebangs_exists==true then
     table.insert(self.engine_options,"Thebangs")
   end
-  self.param_names={"scale","root","tuning","division","step_direction","engine_enabled","midi","legato","crow","midichannel","midi in","midichannelin"}
+  self.param_names={"scale","root","tuning","division","direction","engine_enabled","midi","legato","crow","midichannel","midi in","midichannelin"}
   self.engine_params={}
   self.engine_params["MxSamples"]={"mx_instrument","mx_velocity","mx_amp","mx_pan","mx_release","mx_attack"}
   self.engine_params["PolyPerc"]={"pp_amp","pp_pw","pp_cut","pp_release"}
@@ -466,7 +467,7 @@ function Plonky:setup_params()
       self:build_scale()
     end}
     params:add{type="option",id=i.."division",name="division",options=self.division_names,default=7}
-    params:add{type="option",id=i.."step_direction",name="step_direction",options=self.step_name,default=3}
+    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=4} --Mirror
 	params:add{type="control",id=i.."legato",name="legato",controlspec=controlspec.new(1,99,'lin',1,50,'%')}
     params:add{type="binary",id=i.."arp",name="arp",behavior="toggle",default=0}
     params:hide(i.."arp")
@@ -673,16 +674,35 @@ function Plonky:emit_note(division,step)
           clock.sleep(clock.get_beat_sec()/(division/2)*params:get(i.."legato")/100)
           self:press_note(self.voices[i].voice_set,row,col,false)
         end)
-				
-		if params:get(i.."step_direction")==3 then
-			self.voices[i].arp_step=self.voices[i].arp_step+1
-	    elseif params:get(i.."step_direction")==1 then
-			self.voices[i].arp_step=self.voices[i].arp_step-1
-		elseif params:get(i.."step_direction")==2 then
-			self.voices[i].arp_step=self.voices[i].arp_step+math.random(keys_len)
-		end
 		
-        
+			
+		
+		if params:get(i.."direction")==3 then
+			self.voices[i].arp_step=self.voices[i].arp_step+1
+	    elseif params:get(i.."direction")==1 then
+			self.voices[i].arp_step=self.voices[i].arp_step-1
+		elseif params:get(i.."direction")==2 then
+			self.voices[i].arp_step=self.voices[i].arp_step+math.random(keys_len)
+		elseif params:get(i.."direction")==4 then
+			local _index = (self.voices[i].arp_step%keys_len)
+			if _index == 1 then
+				self.voices[i].step_position="F"
+				self.voices[i].step_direction="F"
+			elseif _index==0 then
+				self.voices[i].step_position="L"
+				self.voices[i].step_direction="B"
+			else
+				self.voices[i].step_position="S"
+			end
+			if self.debug then
+				print("THIS"..self.voices[i].arp_step.."/"..keys_len.." - "..self.voices[i].step_position.." | "..self.voices[i].step_direction)		
+			end
+			if self.voices[i].step_direction=="F" then
+				self.voices[i].arp_step=self.voices[i].arp_step+1
+			elseif self.voices[i].step_direction == "B" then
+				self.voices[i].arp_step=self.voices[i].arp_step-1
+			end
+		end        
       end
       update=true
     end
