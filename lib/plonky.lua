@@ -467,7 +467,7 @@ function Plonky:setup_params()
       self:build_scale()
     end}
     params:add{type="option",id=i.."division",name="division",options=self.division_names,default=7}
-    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=4} --Mirror
+    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=3}
 	params:add{type="control",id=i.."legato",name="legato",controlspec=controlspec.new(1,99,'lin',1,50,'%')}
     params:add{type="binary",id=i.."arp",name="arp",behavior="toggle",default=0}
     params:hide(i.."arp")
