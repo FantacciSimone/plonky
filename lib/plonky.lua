@@ -191,7 +191,7 @@ function Plonky:new(args)
   m.timers={}
   m.divisions={1,2,4,6,8,12,16,24,32,48,64}
   m.division_names={"2","1","1/2","1/2t","1/4","1/4t","1/8","1/8t","1/16","1/16t","1/32"}
-  m.step_name={"Backward","Random","Forward","Mirror"}
+  m.step_name={"Backward","Random","Forward","Mirror","Hives"}
   for _,division in ipairs(m.divisions) do
     m.timers[division]={}
     m.timers[division].lattice=m.lattice:new_pattern{
@@ -467,7 +467,7 @@ function Plonky:setup_params()
       self:build_scale()
     end}
     params:add{type="option",id=i.."division",name="division",options=self.division_names,default=7}
-    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=3}
+    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=4}
 	params:add{type="control",id=i.."legato",name="legato",controlspec=controlspec.new(1,99,'lin',1,50,'%')}
     params:add{type="binary",id=i.."arp",name="arp",behavior="toggle",default=0}
     params:hide(i.."arp")
@@ -673,35 +673,70 @@ function Plonky:emit_note(division,step)
         clock.run(function()
           clock.sleep(clock.get_beat_sec()/(division/2)*params:get(i.."legato")/100)
           self:press_note(self.voices[i].voice_set,row,col,false)
+	  	  
         end)
 		
 			
 		
 		if params:get(i.."direction")==3 then
 			self.voices[i].arp_step=self.voices[i].arp_step+1
-	    elseif params:get(i.."direction")==1 then
+	    	elseif params:get(i.."direction")==1 then
 			self.voices[i].arp_step=self.voices[i].arp_step-1
 		elseif params:get(i.."direction")==2 then
 			self.voices[i].arp_step=self.voices[i].arp_step+math.random(keys_len)
 		elseif params:get(i.."direction")==4 then
 			local _index = (self.voices[i].arp_step%keys_len)
 			if _index == 1 then
-				self.voices[i].step_position="F"
+				self.voices[i].step_position="FIRST"
 				self.voices[i].step_direction="F"
 			elseif _index==0 then
-				self.voices[i].step_position="L"
+				self.voices[i].step_position="LAST "
 				self.voices[i].step_direction="B"
 			else
-				self.voices[i].step_position="S"
+				self.voices[i].step_position="STEP "
 			end
 			if self.debug then
-				print("THIS"..self.voices[i].arp_step.."/"..keys_len.." - "..self.voices[i].step_position.." | "..self.voices[i].step_direction)		
+				print("THIS: ".._index.." - "..self.voices[i].arp_step.."/"..keys_len.." - "..self.voices[i].step_position.." | "..self.voices[i].step_direction.." | "..self.voices[i].current_note.." "..MusicUtil.note_num_to_name(self:get_note_from_pos(i,row,col),true))		
 			end
 			if self.voices[i].step_direction=="F" then
 				self.voices[i].arp_step=self.voices[i].arp_step+1
 			elseif self.voices[i].step_direction == "B" then
 				self.voices[i].arp_step=self.voices[i].arp_step-1
 			end
+		elseif params:get(i.."direction")==5 then
+			local _index = (self.voices[i].arp_step%keys_len)
+			
+			if _index == 1 then
+				self.voices[i].step_position="FIRST "
+				if self.voices[i].step_direction=="B" then
+					self.voices[i].step_direction="S"
+				elseif self.voices[i].step_direction=="S" then
+					self.voices[i].step_direction="F"
+				else
+					self.voices[i].step_direction="F"
+				end
+			elseif _index==0 then
+				self.voices[i].step_position="LAST  "
+				if self.voices[i].step_direction=="F" then
+					self.voices[i].step_direction="S"
+				elseif self.voices[i].step_direction=="S" then
+					self.voices[i].step_direction="B"
+				else
+					self.voices[i].step_direction="B"
+				end
+			else
+				self.voices[i].step_position="STEP  "
+			end
+
+			if self.debug then
+				print("THIS: ".._index.." - "..self.voices[i].arp_step.."/"..keys_len.." - "..self.voices[i].step_position.." | "..self.voices[i].step_direction.." | "..self.voices[i].current_note.." "..MusicUtil.note_num_to_name(self:get_note_from_pos(i,row,col),true))		
+			end
+
+			if self.voices[i].step_direction=="F" then
+				self.voices[i].arp_step=self.voices[i].arp_step+1
+			elseif self.voices[i].step_direction == "B" then
+				self.voices[i].arp_step=self.voices[i].arp_step-1
+			end	
 		end        
       end
       update=true
