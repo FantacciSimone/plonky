@@ -191,7 +191,7 @@ function Plonky:new(args)
   m.timers={}
   m.divisions={1,2,4,6,8,12,16,24,32,48,64}
   m.division_names={"2","1","1/2","1/2t","1/4","1/4t","1/8","1/8t","1/16","1/16t","1/32"}
-  m.step_name={"Backward","Random","Forward","Mirror","Hives"}
+  m.step_name={"forward","backward","random","mirror","hives"}
   for _,division in ipairs(m.divisions) do
     m.timers[division]={}
     m.timers[division].lattice=m.lattice:new_pattern{
@@ -344,36 +344,110 @@ function Plonky:setup_params()
   if thebangs_exists==true then
     table.insert(self.engine_options,"Thebangs")
   end
-  self.param_names={"scale","root","tuning","division","direction","engine_enabled","midi","legato","crow","midichannel","midi in","midichannelin"}
+  self.param_names={"scale","root","tuning","from","last","division","direction","engine_enabled","midi","legato","crow","crow_mode","JF","JF_mode","midichannel","midi in","midichannelin"}
   self.engine_params={}
   self.engine_params["MxSamples"]={"mx_instrument","mx_velocity","mx_amp","mx_pan","mx_release","mx_attack"}
   self.engine_params["PolyPerc"]={"pp_amp","pp_pw","pp_cut","pp_release"}
   self.engine_params["MollyThePoly"]={"osc_wave_shape","pulse_width_mod","pulse_width_mod_src","freq_mod_lfo","freq_mod_env","mtp_glide","main_osc_level","sub_osc_level","sub_osc_detune","noise_level","hp_filter_cutoff","lp_filter_cutoff","lp_filter_resonance","lp_filter_type","lp_filter_env","lp_filter_mod_env","lp_filter_mod_lfo","lp_filter_tracking","lfo_freq","lfo_fade","lfo_wave_shape","env_1_attack","env_1_decay","env_1_sustain","env_1_release","env_2_attack","env_2_decay","env_2_sustain","env_2_release","mtp_amp","mtp_amp_mod","ring_mod_freq","ring_mod_fade","ring_mod_mix","chorus_mix"}
   self.engine_params["Thebangs"]={"algo","steal_mode","steal_index","max_voices","b_attack","b_amp","b_pw","b_release","b_cutoff","b_gain","b_pan"}
 
-  params:add_group("PLONKY",74*self.num_voices+5)
+  params:add_group("PLONKY",76*self.num_voices+5)
   params:add{type="number",id="voice",name="voice",min=1,max=self.num_voices,default=1,action=function(v)
     self:reload_params(v)
     if not self.disable_menu_reload then
       _menu.rebuild_params()
     end
   end}
+    params:add_separator("plonky")
+  for i=1,self.num_voices do
+    params:add{type="option",id=i.."scale",name="scale",options=self.scale_names,default=1,action=function(v)
+      self:build_scale()
+    end}
+    params:add{type="number",id=i.."root",name="root",min=0,max=36,default=24,formatter=function(param)
+      return MusicUtil.note_num_to_name(param:get(),true)
+    end,action=function(v)
+      self:build_scale()
+    end}
+    params:add{type="number",id=i.."tuning",name="string tuning",min=0,max=7,default=5,formatter=function(param)
+      return "+"..param:get()
+    end,action=function(v)
+      self:build_scale()
+    end}
+    params:add{type="number",id=i.."from",name="from voice",min=1,max=8,default=i}
+    params:add{type="number",id=i.."last",name="last note",min=0,max=127,default=24,formatter=function(param)
+      return MusicUtil.note_num_to_name(param:get(),true)
+    end,action=function(v)
+    end}
+    params:add{type="option",id=i.."division",name="division",options=self.division_names,default=7}
+    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=4}
+	params:add{type="control",id=i.."legato",name="legato",controlspec=controlspec.new(1,200,'lin',1,50,'%')}
+    params:add{type="binary",id=i.."arp",name="arp",behavior="toggle",default=0}
+    params:hide(i.."arp")
+    params:add{type="binary",id=i.."latch",name="latch",behavior="toggle",default=0,action=function(v)
+      if v==1 then
+        -- load latched steps
+        if params:get(i.."latch_steps")~="" and params:get(i.."latch_steps")~="[]" then
+          self.voices[i].latched=json.decode(params:get(i.."latch_steps"))
+        end
+      end
+    end}
+    params:hide(i.."latch")
+    params:add{type="binary",id=i.."mute_non_arp",name="mute non-arp",behavior="toggle",default=0}
+    params:hide(i.."mute_non_arp")
+    params:add{type="binary",id=i.."record",name="record pattern",behavior="toggle",default=0,action=function(v)
+      if v==1 then
+        self.voices[i].record_step=0
+        self.voices[i].record_step_adj=0
+        self.voices[i].record_steps={}
+        self.voices[i].cluster={}
+      elseif v==0 and self.voices[i].record_step>0 then
+        if self.debug then
+          print(json.encode(self.voices[i].record_steps))
+        end
+        params:set(i.."play_steps",json.encode(self.voices[i].record_steps))
+      end
+    end}
+    params:hide(i.."record")
+    params:add{type="binary",id=i.."play",name="play",behavior="toggle",action=function(v)
+      if v==1 then
+        if params:get(i.."play_steps")~="[]" and params:get(i.."play_steps")~="" then
+          if self.debug then print("playing "..i) end
+          self.voices[i].play_steps=json.decode(params:get(i.."play_steps"))
+          self.voices[i].play_step=0
+        else
+          params:set(i.."play",0)
+        end
+      else
+        print("stopping "..i)
+      end
+    end}
+    params:hide(i.."play")
+    params:add_text(i.."play_steps",i.."play_steps","")
+    params:hide(i.."play_steps")
+    params:add_text(i.."latch_steps",i.."latch_steps","[]")
+    params:hide(i.."latch_steps")
+  end
   params:add_separator("outputs")
   for i=1,self.num_voices do
     -- midi out
-    params:add{type="option",id=i.."engine_enabled",name="engine",options={"disabled","enabled"},default=2}
+    params:add{type="option",id=i.."engine_enabled",name="engine",options={"disabled","enabled"},default=1}
     params:add{type="option",id=i.."midi",name="midi out",options=self.device_list,default=1}
     params:add{type="number",id=i.."midichannel",name="midi out ch",min=1,max=16,default=1}
-    params:add{type="option",id=i.."crow",name="crow/JF",options={"disabled","crow out 1+2","crow out 3+4","crow ii JF"},default=1,action=function(v)
+    params:add{type="option",id=i.."crow",name="crow out",options={"disabled","Cv1 + Gate2","Cv3 + Gate4"},default=1,action=function(v)
       if v==2 then
         crow.output[2].action="{to(5,0),to(0,0.25)}"
       elseif v==3 then
         crow.output[4].action="{to(5,0),to(0,0.25)}"
-      elseif v==4 then
+      end
+    end}
+	params:add{type="option",id=i.."crow_mode",name="crow mode",options={"all","cluster only","finger only"},default=1}
+	params:add{type="option",id=i.."JF",name="JF",options={"disabled","crow ii JF"},default=1,action=function(v)
+      if v==2 then
         crow.ii.pullup(true)
         crow.ii.jf.mode(1)
       end
     end}
+	params:add{type="option",id=i.."JF_mode",name="JF mode",options={"all","cluster only","finger only"},default=1}
   end
   params:add_separator("inputs")
   for i=1,self.num_voices do
@@ -449,71 +523,6 @@ function Plonky:setup_params()
     params:add{type="control",id=i.."b_gain",name="gain",controlspec=controlspec.new(0,4,'lin',0,1,'')}
     params:add{type="control",id=i.."b_pan",name="pan",controlspec=controlspec.new(-1,1,'lin',0,0,'')}
 
-  end
-
-  params:add_separator("plonky")
-  for i=1,self.num_voices do
-    params:add{type="option",id=i.."scale",name="scale",options=self.scale_names,default=1,action=function(v)
-      self:build_scale()
-    end}
-    params:add{type="number",id=i.."root",name="root",min=0,max=36,default=24,formatter=function(param)
-      return MusicUtil.note_num_to_name(param:get(),true)
-    end,action=function(v)
-      self:build_scale()
-    end}
-    params:add{type="number",id=i.."tuning",name="string tuning",min=0,max=7,default=5,formatter=function(param)
-      return "+"..param:get()
-    end,action=function(v)
-      self:build_scale()
-    end}
-    params:add{type="option",id=i.."division",name="division",options=self.division_names,default=7}
-    params:add{type="option",id=i.."direction",name="direction",options=self.step_name,default=4}
-	params:add{type="control",id=i.."legato",name="legato",controlspec=controlspec.new(1,99,'lin',1,50,'%')}
-    params:add{type="binary",id=i.."arp",name="arp",behavior="toggle",default=0}
-    params:hide(i.."arp")
-    params:add{type="binary",id=i.."latch",name="latch",behavior="toggle",default=0,action=function(v)
-      if v==1 then
-        -- load latched steps
-        if params:get(i.."latch_steps")~="" and params:get(i.."latch_steps")~="[]" then
-          self.voices[i].latched=json.decode(params:get(i.."latch_steps"))
-        end
-      end
-    end}
-    params:hide(i.."latch")
-    params:add{type="binary",id=i.."mute_non_arp",name="mute non-arp",behavior="toggle",default=0}
-    params:hide(i.."mute_non_arp")
-    params:add{type="binary",id=i.."record",name="record pattern",behavior="toggle",default=0,action=function(v)
-      if v==1 then
-        self.voices[i].record_step=0
-        self.voices[i].record_step_adj=0
-        self.voices[i].record_steps={}
-        self.voices[i].cluster={}
-      elseif v==0 and self.voices[i].record_step>0 then
-        if self.debug then
-          print(json.encode(self.voices[i].record_steps))
-        end
-        params:set(i.."play_steps",json.encode(self.voices[i].record_steps))
-      end
-    end}
-    params:hide(i.."record")
-    params:add{type="binary",id=i.."play",name="play",behavior="toggle",action=function(v)
-      if v==1 then
-        if params:get(i.."play_steps")~="[]" and params:get(i.."play_steps")~="" then
-          if self.debug then print("playing "..i) end
-          self.voices[i].play_steps=json.decode(params:get(i.."play_steps"))
-          self.voices[i].play_step=0
-        else
-          params:set(i.."play",0)
-        end
-      else
-        print("stopping "..i)
-      end
-    end}
-    params:hide(i.."play")
-    params:add_text(i.."play_steps",i.."play_steps","")
-    params:hide(i.."play_steps")
-    params:add_text(i.."latch_steps",i.."latch_steps","[]")
-    params:hide(i.."latch_steps")
   end
   params:add{type="option",id="mandoengine",name="engine",options=self.engine_options,action=function()
     self.updateengine=10
@@ -676,15 +685,13 @@ function Plonky:emit_note(division,step)
 	  	  
         end)
 		
-			
-		
-		if params:get(i.."direction")==3 then
+		if params:get(i.."direction")==1 then --forward
 			self.voices[i].arp_step=self.voices[i].arp_step+1
-	    	elseif params:get(i.."direction")==1 then
+		elseif params:get(i.."direction")==2 then --backward
 			self.voices[i].arp_step=self.voices[i].arp_step-1
-		elseif params:get(i.."direction")==2 then
+		elseif params:get(i.."direction")==3 then --random
 			self.voices[i].arp_step=self.voices[i].arp_step+math.random(keys_len)
-		elseif params:get(i.."direction")==4 then
+		elseif params:get(i.."direction")==4 then --mirror
 			local _index = (self.voices[i].arp_step%keys_len)
 			if _index == 1 then
 				self.voices[i].step_position="FIRST"
@@ -703,9 +710,8 @@ function Plonky:emit_note(division,step)
 			elseif self.voices[i].step_direction == "B" then
 				self.voices[i].arp_step=self.voices[i].arp_step-1
 			end
-		elseif params:get(i.."direction")==5 then
+		elseif params:get(i.."direction")==5 then --hives
 			local _index = (self.voices[i].arp_step%keys_len)
-			
 			if _index == 1 then
 				self.voices[i].step_position="FIRST "
 				if self.voices[i].step_direction=="B" then
@@ -727,11 +733,9 @@ function Plonky:emit_note(division,step)
 			else
 				self.voices[i].step_position="STEP  "
 			end
-
 			if self.debug then
 				print("THIS: ".._index.." - "..self.voices[i].arp_step.."/"..keys_len.." - "..self.voices[i].step_position.." | "..self.voices[i].step_direction.." | "..self.voices[i].current_note.." "..MusicUtil.note_num_to_name(self:get_note_from_pos(i,row,col),true))		
 			end
-
 			if self.voices[i].step_direction=="F" then
 				self.voices[i].arp_step=self.voices[i].arp_step+1
 			elseif self.voices[i].step_direction == "B" then
@@ -925,6 +929,7 @@ function Plonky:press_midi_note(name,channel,note,velocity,on)
         local positions=self.voices[i].note_to_pos[note]
         if positions~=nil then
           self:key_press(positions[1][1],positions[1][2],on)
+           -- params:set(i.."last",note) SET LAST FROM MIDI IN
         end
       end
     end
@@ -949,6 +954,9 @@ function Plonky:press_note(voice_set,row,col,on,is_finger)
   if self.debug then
     print("voice "..voice.." press note "..MusicUtil.note_num_to_name(note,true))
   end
+
+  -- set last note   
+  params:set(voice.."last",note)
 
   -- determine if muted
   if is_finger~=nil and is_finger then
@@ -1056,16 +1064,53 @@ function Plonky:press_note(voice_set,row,col,on,is_finger)
   end
 
   -- play on crow
+  local play_crow=false
   if params:get(voice.."crow")>1 and on then
-    if params:get(voice.."crow")==2 then
-      crow.output[1].volts=(note-60)/12
-      crow.output[2].execute()
-    elseif params:get(voice.."crow")==3 then
-      crow.output[3].volts=(note-60)/12
-      crow.output[4].execute()
-    elseif params:get(voice.."crow")==4 then
-      crow.ii.jf.play_note((note-60)/12,5)
-    end
+    if params:get(voice.."crow_mode")>1 then
+		if params:get(voice.."crow_mode")==2 then
+			if not (is_finger~=nil and is_finger) then
+				play_crow=true
+			end
+		elseif params:get(voice.."crow_mode")==3 then
+			if is_finger~=nil and is_finger then
+				play_crow=true
+			end
+		end
+	else
+		play_crow=true
+	end
+  end
+  if play_crow then
+	if params:get(voice.."crow")==2 then
+	  crow.output[1].volts=(note-60)/12
+	  crow.output[2].execute()
+	elseif params:get(voice.."crow")==3 then
+	  crow.output[3].volts=(note-60)/12
+	  crow.output[4].execute()
+	end
+  end
+  
+  -- play on JF
+  local play_jf=false
+  if params:get(voice.."JF")>1 and on then
+	if params:get(voice.."JF_mode")>1 then
+		if params:get(voice.."JF_mode")==2 then
+			if not (is_finger~=nil and is_finger) then
+				play_jf=true
+			end
+		elseif params:get(voice.."JF_mode")==3 then
+			if is_finger~=nil and is_finger then
+				play_jf=true
+			end
+		end
+	else
+		play_jf=true
+	end
+  end
+  if play_jf then
+  	if params:get(voice.."JF")==2 then
+	  crow.ii.jf.play_note((note-60)/12,5)
+	end
   end
 end
 
@@ -1089,7 +1134,18 @@ function Plonky:get_note_from_pos(voice,row,col)
   if voice%2==0 then
     col=col-8
   end
-  return self.voices[voice].scale[(params:get(voice.."tuning")-1)*(col-1)+(9-row)]
+  local _from = (params:get(voice.."from"))
+  local _lastFrom = (params:get(_from.."last"))
+  local _tuning = (params:get(voice.."tuning")-1)
+  local _note = self.voices[voice].scale[_tuning*(col-1)+(9-row)]
+
+  print("LAST:".._lastFrom.." | NOTE:".._note)
+  if _from ~= voice then
+   _note =  _note + (_lastFrom - _note)
+  end
+  print("---> NOTE:".._note)
+
+  return _note
 end
 
 function Plonky:get_keys_sorted_by_value(tbl)
